@@ -10,5 +10,6 @@
     "compile_models": true,
     "enable_spatial_cache": true,
     "target_fps":null,
-    "interpolation_exp": 2
+    "interpolation_exp": 2,
+    "use_reference_image": false
 }
