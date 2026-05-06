@@ -35,6 +35,7 @@ class ModelInferenceSubprocess:
         self.width = self.config["resolution"]["width"]
         self.resolution = self.config["resolution"]
         self.prompt = self.config["default_prompt"]
+        self.logging = self.config.get("logging", True)
         self.input_shared_tensor_name = input_shared_tensor_name
         self.output_batch_shared_tensor_name = output_batch_shared_tensor_name
         self.pack_is_ready = pack_is_ready
@@ -105,6 +106,7 @@ class ModelInferenceSubprocess:
             )
 
         self.update_controller = UpdateController(
+            self.config,
             self.height,
             self.width,
             compression_ratio=16,
@@ -195,6 +197,18 @@ class ModelInferenceSubprocess:
             )
         self.command_queue.put(("set_reference_image", image))
 
+    def set_mask(self, mask) -> None:
+        """
+        Update the mask on the fly.
+        mask: numpy uint8 array of shape (h // compression_ratio, w // compression_ratio).
+        Only valid when mask_calculation_method is set to manual in config.
+        """
+        if self.config.get("mask_calculation_method", "auto") != "manual":
+            raise ValueError(
+                "set_mask called but mask_calculation_method is not set to manual in the config"
+            )
+        self.command_queue.put(("set_mask", mask))
+
     def update_process_state(self) -> None:
         """
         Called by the internal process
@@ -215,6 +229,14 @@ class ModelInferenceSubprocess:
                     )
                     self.reference_image = Image.fromarray(image)
                     self.update_controller.reset_cache()
+                elif cmd == "set_mask":
+                    mask = payload  # numpy uint8 array of shape (h // compression_ratio, w // compression_ratio)
+                    mask_tensor = (
+                        torch.from_numpy(mask)
+                        .unsqueeze(0)
+                        .to(self.update_controller.device)
+                    )
+                    self.update_controller.set_mask(mask_tensor)
 
         except Empty:
             pass
@@ -293,9 +315,10 @@ class ModelInferenceSubprocess:
         self.send_frames(frames)
         self.pack_is_ready.value = True
 
-        print(
-            f"base fps: {(1 / processing_time):.2f}, interpolated fps: {(1 / processing_time * 2**self.interpolation_exp):.2f}"
-        )
+        if self.logging:
+            print(
+                f"base fps: {(1 / processing_time):.2f}, interpolated fps: {(1 / processing_time * 2**self.interpolation_exp):.2f}"
+            )
         return now
 
     def process_frame_with_pipeline(self, frame):

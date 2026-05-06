@@ -7,8 +7,18 @@ import time
 
 
 class UpdateController:
+    """
+    Controls cache updates inside the model through mask values.
+
+    Output mask values:
+    - 0: skip, not exectute, not update
+    - 1: execute only, no update
+    - 2: both execute and update
+    """
+
     def __init__(
         self,
+        config: dict,
         height: int,
         width: int,
         compression_ratio: int,
@@ -38,14 +48,48 @@ class UpdateController:
         self.requires_reset = False
         self.text_is_valid = False
         self.reference_image_is_valid = False
+        self.config = config
+
+        self.mask_calculation_method = config.get("mask_calculation_method", "auto")
+        self.always_update_image_cache = config.get("always_update_image_cache", True)
+
+        self.requires_update_image_cache = True
+
+        if self.mask_calculation_method == "manual":
+            self.mask = None
+
+    def set_mask(self, mask: torch.Tensor):
+        """
+        Only works when mask_calculation_method is set to "manual"
+        Args:
+            mask: tensor of shape (1, h // compression_ratio, w // compression_ratio)
+        """
+        if self.mask_calculation_method != "manual":
+            raise ValueError("Mask calculation method is not set to manual.")
+
+        self.mask = mask
+
+    def update_image_cache(self):
+        self.requires_update_image_cache = True
 
     def update_and_get_mask(self, frame: torch.Tensor):
         """
         Args:
             frame: tensor of shape (1, 3, h, w)
         Returns:
-            mask: binary bool tensor of shape (1, h // compression_ratio, w // compression_ratio)
+            mask: tensor of shape (1, h // compression_ratio, w // compression_ratio)
         """
+        if self.mask_calculation_method == "manual":
+            if self.mask is None:
+                return torch.zeros(
+                    1,
+                    self.mask_height,
+                    self.mask_width,
+                    device=self.device,
+                    dtype=torch.int32,
+                )
+            return self.mask
+
         if self.reset_period is not None:
             if time.time() - self.previous_reset > self.reset_period:
                 self.requires_reset = True
@@ -54,12 +98,15 @@ class UpdateController:
             self.cached_frame = frame
             self.previous_reset = time.time()
             self.requires_reset = False
-            return torch.ones(
-                1,
-                self.mask_height,
-                self.mask_width,
-                device=self.device,
-                dtype=torch.bool,
+            return (
+                torch.ones(
+                    1,
+                    self.mask_height,
+                    self.mask_width,
+                    device=self.device,
+                    dtype=torch.int32,
+                )
+                * 2
             )
 
         frame_blurred = F.gaussian_blur(frame, kernel_size=3, sigma=0.5)
@@ -94,16 +141,24 @@ class UpdateController:
             self.cached_frame,
         )
 
-        return difference_mask_dilated.squeeze(1)
+        image_mask = difference_mask_dilated.squeeze(1).to(torch.int32)
+
+        if self.requires_update_image_cache:
+            if not self.always_update_image_cache:
+                self.requires_update_image_cache = False
+            return image_mask * 2
+
+        return image_mask
 
     def use_text_mask(self):
         if self.text_is_valid:
             mask = torch.zeros(
-                1, self.text_seq_len, device=self.device, dtype=self.dtype
+                1, self.text_seq_len, device=self.device, dtype=torch.int32
             )
         else:
-            mask = torch.ones(
-                1, self.text_seq_len, device=self.device, dtype=self.dtype
+            mask = (
+                torch.ones(1, self.text_seq_len, device=self.device, dtype=torch.int32)
+                * 2
             )
             self.text_is_valid = True
 
@@ -115,12 +170,18 @@ class UpdateController:
 
         if self.reference_image_is_valid:
             mask = torch.zeros(
-                1, self.reference_image_seq_len, device=self.device, dtype=self.dtype
+                1, self.reference_image_seq_len, device=self.device, dtype=torch.int32
             )
         else:
-            mask = torch.ones(
-                1, self.reference_image_seq_len, device=self.device, dtype=self.dtype
-            )
+            mask = (
+                torch.ones(
+                    1,
+                    self.reference_image_seq_len,
+                    device=self.device,
+                    dtype=torch.int32,
+                )
+                * 2
+            ).to(torch.int32)
             self.reference_image_is_valid = True
 
         return mask

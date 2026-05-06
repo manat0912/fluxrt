@@ -57,6 +57,15 @@ class SpatialCache:
     - Model's prediction
     - Keys and Values of all blocks:
         [Text tokens + Sample tokens + Reference image tokens] in this order.
+
+    Mask format:
+    - Shape: (1, full sequence length)
+    - Dtype: torch.int32
+
+    Mask values:
+    - 0: skip, not exectute, not update
+    - 1: execute only, no update
+    - 2: both execute and update
     """
 
     def __init__(
@@ -86,7 +95,7 @@ class SpatialCache:
             1, image_seq_len, output_channels, device=device, dtype=dtype
         )
 
-        self.valid = torch.zeros(1, self.full_seq_len, device=device, dtype=dtype)
+        self.valid = torch.zeros(1, self.full_seq_len, device=device, dtype=torch.bool)
 
         def get_empty_cache_tensor():
             return torch.zeros(
@@ -113,13 +122,17 @@ class SpatialCache:
     def preprocess_mask(self, input_mask: torch.Tensor) -> torch.Tensor:
         """
         Should be called on enter of forward before model's logic.
-        Adds ones to mask to prevent usage of invalid cache.
+        Adds 'execute and update' values to mask to where cache is now invalid.
         Args:
-            input_mask: binary mask with shape (1, text_seq_len + image_seq_len)
+            input_mask: mask with shape (1, text_seq_len + image_seq_len)
         Returns
-            mask: binary mask with shape (1, text_seq_len + image_seq_len)
+            mask: mask with shape (1, text_seq_len + image_seq_len)
         """
-        return torch.logical_or(torch.logical_not(self.valid), input_mask)
+        return torch.where(
+            self.valid == 0,
+            torch.tensor(2, device=self.device, dtype=torch.int32),
+            input_mask,
+        )
 
     def sync_with_output_cache(
         self, mask: torch.Tensor, masked_prediction: torch.Tensor
@@ -127,24 +140,28 @@ class SpatialCache:
         """
         Fills the masked prediction with tokens from cache + updates cache.
         Args:
-            mask: binary mask with shape (1, text_seq_len + image_seq_len)
+            mask: mask with shape (1, text_seq_len + image_seq_len)
             masked_prediction: predictions of model with shape (1, image_seq_len, output_channels).
-                The predictions should be valid for active tokens (mask value = 1) and anything for skip tokens (mask value = 0).
+                The predictions should be valid for active tokens (mask value != 0) and anything for skip tokens (mask value = 0).
 
         Returns:
             filled_prediction: model's prediction, where skipped tokens are replaced with tokens from cache.
         """
-        # For prediction cache we only need image part of sequence
-        image_seq_mask = mask[:, self.text_seq_len :]
-        expanded_mask = image_seq_mask.unsqueeze(-1).expand(
-            -1, -1, self.output_channels
-        )  # (1, image_seq_len, output_channels)
+        image_mask = mask[:, self.text_seq_len :]  # (1, image_seq_len)
+
+        execute_mask = image_mask != 0
+        update_mask = image_mask == 2
+
+        execute_exp = execute_mask.unsqueeze(-1)  # (1, image_seq_len, 1)
+        update_exp = update_mask.unsqueeze(-1)  # (1, image_seq_len, 1)
+
         filled_prediction = torch.where(
-            expanded_mask, masked_prediction, self.output_cache
+            execute_exp, masked_prediction, self.output_cache
         )
-        self.valid = torch.logical_or(self.valid, mask)
-        self.text_cache_is_valid = True
-        self.output_cache = filled_prediction
+        self.output_cache = torch.where(
+            update_exp, masked_prediction, self.output_cache
+        )
+        self.valid = torch.logical_or(self.valid, mask == 2)
 
         return filled_prediction
 
@@ -159,42 +176,49 @@ class SpatialCache:
         """
         Fills the masked keys and values with cached keys and values from cache + updates cache.
         Args:
-            mask: binary mask with shape (1, text_seq_len + image_seq_len)
+            mask: mask with shape (1, text_seq_len + image_seq_len)
             masked_keys: keys with shape (1, text_seq_len + image_seq_len, num_attention_heads, attention_head_dim).
-                The keys should be valid for active tokens (mask value = 1) and anything for skip tokens (mask value = 0).
-            masked_values: keys with shape (1, text_seq_len + image_seq_len, num_attention_heads, attention_head_dim).
-                The keys should be valid for active tokens (mask value = 1) and anything for skip tokens (mask value = 0).
+                The keys should be valid for active tokens (mask value != 0) and anything for skip tokens (mask value = 0).
+            masked_values: values with shape (1, text_seq_len + image_seq_len, num_attention_heads, attention_head_dim).
+                The values should be valid for active tokens (mask value != 0) and anything for skip tokens (mask value = 0).
             block_id: index of block, e.g. 0, 1, 2 ... num_layers - 1
             block_type: string "double" or "single"
 
         Returns:
             filled_keys: keys, where skipped tokens are replaced with tokens from cache.
-            filled_valuse: values, where skipped tokens are replaced with tokens from cache.
+            filled_values: values, where skipped tokens are replaced with tokens from cache.
         """
-        expanded_mask = (
-            mask.unsqueeze(-1)
-            .unsqueeze(-1)
-            .expand(-1, -1, self.num_attention_heads, self.attention_head_dim)
-        )  # (1, text_seq_len + image_seq_len, num_attention_heads, attention_head_dim)
+        execute_mask = mask != 0
+        update_mask = mask == 2
+
+        execute_exp = execute_mask.unsqueeze(-1).unsqueeze(
+            -1
+        )  # (1, full_seq_len, 1, 1)
+        update_exp = update_mask.unsqueeze(-1).unsqueeze(-1)  # (1, full_seq_len, 1, 1)
 
         if block_type == "single":
             cached_keys = self.single_block_keys[block_id]
             cached_values = self.single_block_values[block_id]
-
         elif block_type == "double":
             cached_keys = self.double_block_keys[block_id]
             cached_values = self.double_block_values[block_id]
+        else:
+            raise ValueError(
+                f"block_type must be 'single' or 'double', got {block_type}"
+            )
 
-        filled_keys = torch.where(expanded_mask, masked_keys, cached_keys)
-        filled_values = torch.where(expanded_mask, masked_values, cached_values)
+        filled_keys = torch.where(execute_exp, masked_keys, cached_keys)
+        filled_values = torch.where(execute_exp, masked_values, cached_values)
+
+        updated_keys = torch.where(update_exp, masked_keys, cached_keys)
+        updated_values = torch.where(update_exp, masked_values, cached_values)
 
         if block_type == "single":
-            self.single_block_keys[block_id] = filled_keys
-            self.single_block_values[block_id] = filled_values
-
+            self.single_block_keys[block_id] = updated_keys
+            self.single_block_values[block_id] = updated_values
         elif block_type == "double":
-            self.double_block_keys[block_id] = filled_keys
-            self.double_block_values[block_id] = filled_values
+            self.double_block_keys[block_id] = updated_keys
+            self.double_block_values[block_id] = updated_values
 
         return filled_keys, filled_values
 
@@ -1726,15 +1750,6 @@ class Flux2Transformer2DModel(
         if mask is not None:
             mask = spatial_cache.preprocess_mask(mask)
         num_txt_tokens = encoder_hidden_states.shape[1]
-
-        if mask is not None:
-            hidden_states = hidden_states * mask[:, num_txt_tokens:].unsqueeze(-1).to(
-                self.dtype
-            )
-
-            encoder_hidden_states = encoder_hidden_states * mask[
-                :, :num_txt_tokens
-            ].unsqueeze(-1).to(self.dtype)
 
         # 1. Calculate timestep embedding and modulation parameters
         timestep = timestep.to(hidden_states.dtype) * 1000

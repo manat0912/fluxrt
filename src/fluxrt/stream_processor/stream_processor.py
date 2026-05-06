@@ -86,9 +86,16 @@ class StreamProcessor:
     def set_reference_image(self, image) -> None:
         if not self.config.get("use_reference_image", False):
             raise ValueError(
-                "set_reference_image called but use_reference_image is not enabled in the stream processor config"
+                "set_reference_image called but use_reference_image is not enabled in the config"
             )
         self.model_inference_subprocess.set_reference_image(image)
+
+    def set_mask(self, mask) -> None:
+        if self.config.get("mask_calculation_method", "auto") != "manual":
+            raise ValueError(
+                "set_mask called but mask_calculation_method is not set to manual in the config"
+            )
+        self.model_inference_subprocess.set_mask(mask)
 
     def get_resolution(self) -> dict:
         return self.resolution

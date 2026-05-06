@@ -22,8 +22,8 @@ def get_processor():
     global stream_processor, input_tensor, output_tensor, resolution
 
     if stream_processor is None:
-        stream_processor = StreamProcessor("configs/stream_processor_config.json")
-        # stream_processor = StreamProcessor("configs/config_with_reference.json")
+        # stream_processor = StreamProcessor("configs/stream_processor_config.json")
+        stream_processor = StreamProcessor("configs/config_with_reference.json")
         stream_processor.start()
         stream_processor.set_prompt(default_prompt)
 

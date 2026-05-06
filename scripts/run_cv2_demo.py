@@ -12,12 +12,11 @@ def main():
 
     stream_processor.start()
     stream_processor.set_prompt(
-        "Turn this image into cyberpunk night street scene, "
-        "red and blue neon lamps, cinematic lighting, bokeh"
+        "Turn this image into cyberpunk night, red and blue neon lamps, cinematic lighting, bokeh"
     )
 
     resolution = stream_processor.get_resolution()
-    cap = cv2.VideoCapture("assets/video.mp4")
+    cap = cv2.VideoCapture("local_samples/video.mp4")
 
     while True:
         ret, frame = cap.read()

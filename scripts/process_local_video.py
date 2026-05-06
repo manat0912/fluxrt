@@ -12,7 +12,9 @@ def main():
     output_tensor = stream_processor.get_output_tensor()
 
     stream_processor.start()
-    stream_processor.set_prompt("Make white background")
+    stream_processor.set_prompt(
+        "Turn this image into cyberpunk night, red and blue neon lamps, cinematic lighting, bokeh"
+    )
 
     resolution = stream_processor.get_resolution()
     cap = cv2.VideoCapture("video.mp4")

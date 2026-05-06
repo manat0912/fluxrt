@@ -1,5 +1,5 @@
 {
-    "default_prompt" : "The man is now wearing this jacket.",
+    "default_prompt" : "",
     "default_steps" : 2,
     "default_seed" : 52,
     "models_path" : "FLUX.2-klein-4B",
@@ -11,11 +11,8 @@
     "enable_spatial_cache": true,
     "target_fps":null,
     "interpolation_exp": 2,
-    "use_reference_image": true,
-    "reference_image_path": "assets/reference.png",
-    "reference_image_resolution": {
-        "height" : 256,
-        "width" : 256
-    },
-    "logging": true
+    "use_reference_image": false,
+    "logging": false,
+    "always_update_image_cache": false,
+    "mask_calculation_method": "manual"
 }

@@ -942,10 +942,10 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
             mask = self.update_controller.update_and_get_mask(
                 condition_images[0].to(device)
             )
-            mask_np = mask.to(torch.uint8).permute(1, 2, 0).mul(255).cpu().numpy()
-            mask_np = cv2.resize(
-                mask_np, (576 // 4, 320 // 4), interpolation=cv2.INTER_NEAREST
-            )
+            # mask_np = mask.to(torch.uint8).permute(1, 2, 0).mul(127).cpu().numpy()
+            # mask_np = cv2.resize(
+            #     mask_np, (576 // 4, 320 // 4), interpolation=cv2.INTER_NEAREST
+            # )
             # cv2.imshow("out", mask_np)
             # cv2.waitKey(1)
 
@@ -962,9 +962,10 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
             reference_image_mask = self.update_controller.use_reference_image_mask()
             if reference_image_mask is not None:
                 mask = torch.cat([mask, reference_image_mask], dim=-1)
-            print(
-                f"recomputing {(mask.float().sum() / mask.shape[1] * 100):.2f}% of tokens"
-            )
+            if self.subprocess_config["logging"]:
+                print(
+                    f"recomputing {(mask.float().sum() / mask.shape[1] * 100):.2f}% of tokens"
+                )
 
         # We set the index here to remove DtoH sync, helpful especially during compilation.
         # Check out more details here: https://github.com/huggingface/diffusers/pull/11696

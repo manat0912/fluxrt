@@ -22,6 +22,10 @@ Example: a simple real-time AI fitting room using a clothing item image as refer
 
 ![Reference Demo](./assets/reference_demo.gif)
 
+Example 2: interactive paint-style app with iterative image updates.
+
+![Interacive paint demo](./assets/paint_demo.gif)
+
 
 # Quick Start
 
@@ -127,6 +131,12 @@ python scripts/run_cv2_demo.py
 
 ```bash
 python scripts/run_cv2_reference_demo.py
+```
+
+### OpenCV Paint App
+
+```bash
+python scripts/run_cv2_paint.py
 ```
 
 # How It Works
