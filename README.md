@@ -68,8 +68,12 @@ pip install -e .
 
 Download `flownet.pkl`
 
-* Google Drive
+* [Google Drive](https://drive.google.com/file/d/1h42aGYPNJn2q8j_GVkS_yDu__G_UZ2GX/view?usp=sharing)
 * Backup: [https://github.com/hzwer/ECCV2022-RIFE](https://github.com/hzwer/ECCV2022-RIFE)
+
+The file you need is `RIFE_trained_v6/train_log/flownet.pkl`
+
+Place it to `FluxRT/interpolation_model/flownet.pkl`
 
 ### FLUX.2-klein-4B Base Model
 
