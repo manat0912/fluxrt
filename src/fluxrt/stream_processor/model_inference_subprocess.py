@@ -3,6 +3,7 @@ import time
 import os
 import cv2
 import numpy as np
+from safetensors.torch import load_file
 from multiprocessing import Process, Value, Manager
 from copy import deepcopy
 from queue import Empty
@@ -55,16 +56,11 @@ class ModelInferenceSubprocess:
         }
 
     def load_models(self):
-        def convert(param):
-            return {
-                k.replace("module.", ""): v for k, v in param.items() if "module." in k
-            }
-
         self.interpolation_model = IFNet()
         self.interpolation_model.load_state_dict(
-            convert(torch.load("interpolation_model/flownet.pkl", weights_only=True))
+            load_file("RIFE-safetensors/flownet.safetensors")
         )
-        self.interpolation_model.to(self.device, torch.float16)
+        self.interpolation_model.to("cuda", dtype=torch.float16)
         self.interpolation_model.eval()
 
         device = "cuda"

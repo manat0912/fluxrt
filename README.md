@@ -66,22 +66,29 @@ pip install -e .
 
 ### RIFE Frame Interpolation Model
 
-Download `flownet.pkl`
+Original RIFE model lives here: [https://github.com/hzwer/ECCV2022-RIFE](https://github.com/hzwer/ECCV2022-RIFE)
 
-* [Google Drive](https://drive.google.com/file/d/1h42aGYPNJn2q8j_GVkS_yDu__G_UZ2GX/view?usp=sharing)
-* Backup: [https://github.com/hzwer/ECCV2022-RIFE](https://github.com/hzwer/ECCV2022-RIFE)
+But it is stored as a `pkl` file on the google drive.
 
-The file you need is `RIFE_trained_v6/train_log/flownet.pkl`
+So I have converted it to `safetensors` format and uploaded to [https://huggingface.co/TensorForger/RIFE-safetensors](https://huggingface.co/TensorForger/RIFE-safetensors)
 
-Place it to `FluxRT/interpolation_model/flownet.pkl`
+You can simply clone the repo now:
 
-### FLUX.2-klein-4B Base Model
+```bash
+cd FluxRT
+git clone https://huggingface.co/TensorForger/RIFE-safetensors
+```
+
+### FLUX.2-klein-4B Model
 
 Download from Hugging Face:
 
 [https://huggingface.co/black-forest-labs/FLUX.2-klein-4B](https://huggingface.co/black-forest-labs/FLUX.2-klein-4B)
 
-Place models into the project folder.
+```bash
+cd FluxRT
+git clone https://huggingface.co/black-forest-labs/FLUX.2-klein-4B
+```
 
 <details>
 <summary>Required directory structure</summary>

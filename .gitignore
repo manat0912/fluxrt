@@ -4,6 +4,7 @@ local_samples/
 # Weights
 interpolation_model/
 FLUX.2-klein-4B/
+RIFE-safetensors/
 
 
 # Byte-compiled / optimized / DLL files
