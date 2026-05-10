@@ -211,6 +211,21 @@ You can check report generated on my machine in `benchmark_report.txt`
 
 I would appreciate it if you could share your report in the [issues](https://github.com/tensorforger/FluxRT/issues), especially if it was generated on different hardware setup.
 
+### How to use Lora
+
+To enable lora:
+
+1. Download lora weights to the repo root.
+2. Add these lines in the corresponding config, in case of gradio demo it is `configs/config_with_reference.json` (example for [https://huggingface.co/Sawata97/flux2_4b_koni_animestyle](https://huggingface.co/Sawata97/flux2_4b_koni_animestyle)):
+
+```json
+"use_lora": true,
+"lora_weights_path": "flux2_4b_koni_animestyle/Flux_klein_4b_anime_Koni.safetensors",
+```
+
+Loras work well with `--int8` flag too.
+But note that there are still very few loras for `FLUX.2-Klein-4B` model.
+
 # How It Works
 
 FluxRT combines multiple system-level and model-level optimizations to enable real-time inference.

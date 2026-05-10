@@ -6,6 +6,7 @@ experiments/
 interpolation_model/
 FLUX.2-klein-4B/
 FLUX.2-klein-4B-int8/
+flux2_4b_koni_animestyle/
 RIFE-safetensors/
 
 

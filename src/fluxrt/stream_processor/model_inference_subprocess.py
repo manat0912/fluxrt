@@ -177,6 +177,9 @@ class ModelInferenceSubprocess:
         )
         self.pipe.to(self.device)
 
+        if self.config.get("use_lora", False):
+            self.pipe.load_lora_weights(self.config.get("lora_weights_path", ""))
+
     def update_prompt_embeds(self, prompt):
         self.prompt_embeds, text_ids = self.pipe.encode_prompt(
             prompt=prompt,

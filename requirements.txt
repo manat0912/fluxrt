@@ -6,3 +6,4 @@ gradio==6.12.0
 accelerate
 safetensors>=0.4.0
 optimum-quanto
+peft
