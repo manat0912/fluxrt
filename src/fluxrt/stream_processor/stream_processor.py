@@ -123,3 +123,6 @@ class StreamProcessor:
     def get_reserved_memory(self) -> int:
         """Returns reserved GPU memory in MB."""
         return self.model_inference_subprocess.memory_reserved.value
+
+    def set_gguf_model(self, gguf_path: str) -> None:
+        self.model_inference_subprocess.set_gguf_model(gguf_path)

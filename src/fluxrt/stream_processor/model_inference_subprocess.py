@@ -2,6 +2,7 @@ import torch
 import time
 import cv2
 import numpy as np
+import os
 import json
 from safetensors.torch import load_file
 from multiprocessing import Process, Value, Manager
@@ -227,14 +228,15 @@ class ModelInferenceSubprocess:
         self.previous_frame = None
 
         if self.config.get("use_reference_image", False):
-            image = cv2.imread(self.config.get("reference_image_path", ""))
+            path = self.config.get("reference_image_path", "")
+            image = None
+            if path and os.path.exists(path):
+                image = cv2.imread(path)
+
             resolution = self.config.get("reference_image_resolution")
             if image is None:
                 image = np.zeros(
                     (resolution["height"], resolution["width"], 3), dtype=np.uint8
-                )
-                print(
-                    "Warning: use_reference_image is set to true but no valid reference_image_path is provided."
                 )
             else:
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -287,6 +289,9 @@ class ModelInferenceSubprocess:
     def set_lip_transfer(self, enabled: bool) -> None:
         self.command_queue.put(("set_lip_transfer", enabled))
 
+    def set_gguf_model(self, gguf_path: str) -> None:
+        self.command_queue.put(("set_gguf_model", gguf_path))
+
     def update_process_state(self) -> None:
         """
         Called by the internal process
@@ -327,6 +332,18 @@ class ModelInferenceSubprocess:
 
                 elif cmd == "set_lip_transfer":
                     self.lip_active = payload
+                    
+                elif cmd == "set_gguf_model":
+                    gguf_path = payload
+                    print(f"[DEBUG] Loading GGUF model from {gguf_path}")
+                    if hasattr(self, 'transformer'):
+                        del self.transformer
+                    torch.cuda.empty_cache()
+                    self.transformer = Flux2Transformer2DModel.from_single_file(gguf_path)
+                    self.transformer.to(self.device, torch.bfloat16)
+                    self.pipe.transformer = self.transformer
+                    self.update_controller.reset_cache()
+                    print(f"[DEBUG] Successfully loaded GGUF model from {gguf_path}")
 
         except Empty:
             pass
@@ -423,6 +440,7 @@ class ModelInferenceSubprocess:
         if self.config["use_reference_image"]:
             reference_list.append(self.reference_image)
 
+        start_t = time.time()
         out = self.pipe(
             prompt_embeds=self.prompt_embeds,
             image=reference_list,
@@ -436,9 +454,11 @@ class ModelInferenceSubprocess:
             ),
             output_type="np",
         )
+        end_t = time.time()
         out_image = out.images[0]
         out_image = out_image * 255
         out_image = out_image.astype(np.uint8)
+        print(f"[DEBUG] FLUX.2 generated frame in {end_t - start_t:.2f}s. Image mean pixel value: {out_image.mean():.2f}")
         return out_image
 
     def convert_np_to_torch(self, frame):
