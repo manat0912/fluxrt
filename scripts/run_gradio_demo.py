@@ -135,40 +135,6 @@ def process_webcam(frame):
     _, processed = process_frame(to_bgr(frame))
     return to_rgb(processed)
 
-def _video_loop(video_path: str, video_id: int):
-    global local_current_frame, local_processed_frame
-    cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25
-    frame_time = 1.0 / fps
-    try:
-        while True:
-            with current_video_id_lock:
-                if current_video_id != video_id:
-                    break
-            ok, frame = cap.read()
-            if not ok:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                continue
-            start = time.time()
-            input_frame, processed = process_frame(frame)
-            with local_frame_lock:
-                local_current_frame = to_rgb(input_frame)
-                local_processed_frame = to_rgb(processed)
-            time.sleep(max(0, frame_time - (time.time() - start)))
-    finally:
-        cap.release()
-
-def start_local_video(video_path: str | None):
-    global current_video_id, local_current_frame, local_processed_frame
-    with current_video_id_lock:
-        current_video_id += 1
-        my_id = current_video_id
-    with local_frame_lock:
-        local_current_frame = None
-        local_processed_frame = None
-    if not video_path: return
-    t = threading.Thread(target=_video_loop, args=(video_path, my_id), daemon=True)
-    t.start()
 
 def _image_to_video_loop(image: np.ndarray, video_id: int):
     global local_current_frame, local_processed_frame
@@ -212,23 +178,21 @@ def switch_mode(mode: str):
     # Stop webcam processing
     is_playing = False
 
-    is_cam = mode == "cam to live stream"
-    is_video = mode == "video to video"
-    is_image = mode == "image to image"
-    is_edit = mode == "edit image to video"
+    is_cam = mode == "Cam-to-Live-Stream"
+    is_image = mode == "Image-to-Image"
+    is_video = mode == "Image-to-Video"
 
     return (
         gr.update(visible=is_cam),
         gr.update(visible=not is_cam),
-        gr.update(visible=is_video),
-        gr.update(visible=is_image or is_edit),
-        gr.update(active=(is_video or is_edit)),
+        gr.update(visible=is_image or is_video),
+        gr.update(active=is_video),
         gr.update(visible=is_cam, value="Start Animation", variant="primary"),
         gr.update(visible=not is_cam)
     )
 
-def on_generate_click(mode, video_path, image):
-    if mode == "image to image":
+def on_generate_click(mode, image):
+    if mode == "Image-to-Image":
         if image is None: return None
         
         _, input_tensor, output_tensor, resolution = get_processor()
@@ -252,10 +216,7 @@ def on_generate_click(mode, video_path, image):
             processed = output_tensor.to_numpy()
             
         return to_rgb(processed)
-    elif mode == "video to video":
-        if video_path: start_local_video(video_path)
-        return None
-    elif mode == "edit image to video":
+    elif mode == "Image-to-Video":
         if image is not None: start_image_to_video(image)
         return None
     return None
@@ -280,8 +241,8 @@ def main():
         )
 
         mode = gr.Radio(
-            choices=["cam to live stream", "video to video", "image to image", "edit image to video"],
-            value="cam to live stream",
+            choices=["Cam-to-Live-Stream", "Image-to-Image", "Image-to-Video"],
+            value="Cam-to-Live-Stream",
             label="Mode",
         )
 
@@ -296,8 +257,6 @@ def main():
         local_timer = gr.Timer(value=0.04, active=False)
 
         with gr.Row():
-            with gr.Column(visible=False) as local_input_col:
-                video_file = gr.File(label="Choose Local Video", file_count="single", file_types=["video"], type="filepath")
             with gr.Column(visible=False) as image_input_col:
                 image_file = gr.Image(label="Upload Image", type="numpy", sources=["upload"])
             local_input = gr.Image(label="Input stream", visible=False)
@@ -342,7 +301,7 @@ def main():
             switch_mode,
             inputs=mode,
             outputs=[
-                webcam_output_col, local_output_col, local_input_col, image_input_col,
+                webcam_output_col, local_output_col, image_input_col,
                 local_timer, start_btn, generate_btn
             ]
         )
@@ -359,7 +318,7 @@ def main():
 
         generate_btn.click(
             on_generate_click,
-            inputs=[mode, video_file, image_file],
+            inputs=[mode, image_file],
             outputs=local_output,
         )
 
