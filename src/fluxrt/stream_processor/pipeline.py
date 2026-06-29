@@ -972,6 +972,13 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
             if sigmas is None
             else sigmas
         )
+        # Flow-matching schedulers integrate the velocity field from sigma=1.0
+        # (pure noise) down to sigma=0.0 (clean data), so every sigma must lie in
+        # (0, 1]. Values > 1.0 push the scheduler outside the trained noise range
+        # and the few-step denoise never resolves, leaving the VAE to decode pure
+        # noise ("pixelated mess"). Clamp defensively regardless of the caller.
+        if sigmas is not None:
+            sigmas = np.clip(np.asarray(sigmas, dtype=np.float64), 0.0, 1.0).tolist()
         if (
             sigmas is None
             and hasattr(self.scheduler.config, "use_flow_sigmas")

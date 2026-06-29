@@ -861,18 +861,28 @@ class ModelInferenceSubprocess:
 
         start_t = time.time()
         steps = self.process_state["steps"]
-        sigma_min = self.process_state.get("sigma_min", 0.1)
-        sigma_max = self.process_state.get("sigma_max", 6.0)
-        sigmas = np.linspace(sigma_max, sigma_min, steps).tolist()
-        
+        sigma_min = self.process_state.get("sigma_min", 0.0)
+        sigma_max = self.process_state.get("sigma_max", 1.0)
+        # FLUX.2 uses a flow-matching scheduler whose sigmas must stay within
+        # (0, 1] (1.0 == pure noise, 0 == clean). When the sliders are at their
+        # full-range default, defer to the scheduler's native flow schedule
+        # (sigmas=None) — this is the proven default. Only build a custom schedule
+        # for partial denoising, and keep it inside the valid range.
+        if sigma_max >= 1.0 and sigma_min <= 0.0:
+            sigmas = None
+        else:
+            sigma_max = min(sigma_max, 1.0)
+            sigma_min = max(sigma_min, 0.0)
+            sigmas = np.linspace(sigma_max, sigma_min, steps).tolist()
+
         cfg_scale = self.process_state.get("cfg_scale", 4.5)
-        if self.process_state.get("distilled_mode", False):
+        if self.process_state.get("distilled_mode", True):
             cfg_scale = 1.0
-        noise_offset = self.process_state.get("noise_offset", 0.2)
-        guidance_rescale = self.process_state.get("guidance_rescale", 0.35)
-        eta = self.process_state.get("eta", 0.1)
-        temporal_smoothing = self.process_state.get("temporal_smoothing", 0.35)
-        vae_decode_scaling = self.process_state.get("vae_decode_scaling", 0.85)
+        noise_offset = self.process_state.get("noise_offset", 0.0)
+        guidance_rescale = self.process_state.get("guidance_rescale", 0.0)
+        eta = self.process_state.get("eta", 0.0)
+        temporal_smoothing = self.process_state.get("temporal_smoothing", 0.0)
+        vae_decode_scaling = self.process_state.get("vae_decode_scaling", 1.0)
         denoise = self.process_state.get("denoise", 0.55)
 
         out = self.pipe(
