@@ -192,12 +192,15 @@ class BackgroundCompositor:
     """Master compositor: combines segmenter + click + optical flow tracking.
 
     Orchestrates the full pipeline:
-      1. On first frame or re-click → run segmenter or SAM
-      2. Subsequent frames → propagate mask via optical flow
+      1. Auto multi-class path → re-run the (fast) MediaPipe segmenter every
+         ``resegment_interval`` frames so the protected region tracks head/body
+         motion directly. Optical flow only fills the gaps between re-segments.
+      2. Click (SAM) path → segment on click, then track via optical flow
+         (SAM is too slow to run every frame).
       3. Apply mask: keep original subject pixels, replace background with diffused
     """
 
-    def __init__(self):
+    def __init__(self, resegment_interval: int = 1, mask_feather: int = 9):
         self.class_segmenter = MultiClassSegmenter()
         self.click_segmenter = ClickSegmenter()
         self.tracker = MaskTracker()
@@ -206,6 +209,13 @@ class BackgroundCompositor:
         self.click_points_neg: list[tuple[int, int]] = []
         self.use_clicks = False
         self._recompute = True
+        # How often to re-run the auto segmenter (1 = every frame). MediaPipe
+        # selfie segmentation runs at 30+ fps so per-frame is affordable and
+        # avoids the optical-flow drift that made the mask "flick back".
+        self.resegment_interval = max(1, int(resegment_interval))
+        # Odd kernel size for Gaussian edge feathering (0 disables).
+        self.mask_feather = int(mask_feather)
+        self._frame_count = 0
 
     def set_protect_classes(self, classes: list[str]):
         self.protect_classes = classes
@@ -235,14 +245,25 @@ class BackgroundCompositor:
                 self._recompute = False
             return self.tracker.propagate(frame_rgb)
 
-        if self._recompute:
+        # Auto multi-class path: re-segment on the current frame so the mask
+        # follows real motion instead of drifting via optical flow alone.
+        self._frame_count += 1
+        if (
+            self._recompute
+            or self.resegment_interval <= 1
+            or self._frame_count % self.resegment_interval == 0
+        ):
             mask = self.class_segmenter.get_protect_mask(frame_rgb, self.protect_classes)
             self.tracker.set_mask(mask, frame_rgb)
             self._recompute = False
+            return mask
         return self.tracker.propagate(frame_rgb)
 
     def composite(self, original_rgb: np.ndarray, diffused_rgb: np.ndarray) -> np.ndarray:
         mask = self.get_mask(original_rgb)
+        if self.mask_feather > 1:
+            k = self.mask_feather | 1  # force odd kernel size
+            mask = cv2.GaussianBlur(mask, (k, k), 0)
         m3 = np.stack([mask] * 3, axis=-1).astype(np.float32) / 255.0
         return (original_rgb * m3 + diffused_rgb * (1.0 - m3)).astype(np.uint8)
 

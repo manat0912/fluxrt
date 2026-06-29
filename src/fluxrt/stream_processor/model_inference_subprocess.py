@@ -602,7 +602,11 @@ class ModelInferenceSubprocess:
     def _init_segmenter(self):
         try:
             from fluxrt.stream_processor.postprocessors.segmenter import BackgroundCompositor
-            self.compositor = BackgroundCompositor()
+            seg_cfg = self.config.get("segmentation", {})
+            self.compositor = BackgroundCompositor(
+                resegment_interval=seg_cfg.get("resegment_interval", 1),
+                mask_feather=seg_cfg.get("mask_feather", 9),
+            )
             print("[Subprocess] BackgroundCompositor with multi-class segmenter initialized.")
         except Exception as e:
             print(f"[Subprocess] BackgroundCompositor unavailable: {e}")
