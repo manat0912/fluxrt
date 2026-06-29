@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin: 0; background: #1e1e1e; display: flex; flex-direction: column; align-items: center; }
+  #container { position: relative; display: inline-block; }
+  canvas { display: block; max-width: 100%; cursor: crosshair; }
+  .toolbar { margin: 8px 0; color: #ccc; font-family: sans-serif; font-size: 14px; display: flex; gap: 12px; align-items: center; }
+  .toolbar button { background: #444; color: #fff; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; }
+  .toolbar button:hover { background: #666; }
+  .toolbar .active { background: #0a6; }
+  .coord { font-family: monospace; color: #888; font-size: 12px; }
+  #info { color: #aaa; font-size: 12px; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <span>Mode:</span>
+  <button id="btnPos" class="active">+ Positive</button>
+  <button id="btnNeg">− Negative</button>
+  <button id="btnClear">Clear All</button>
+  <span class="coord" id="coord">(—, —)</span>
+</div>
+<div id="container">
+  <canvas id="c"></canvas>
+</div>
+<div id="info">Click on the image to add points. Green = positive (protect), Red = negative (don't protect)</div>
+
+<script>
+const API_KEY = '{{API_KEY}}';
+const IMG_B64 = '{{IMG_B64}}';
+const EXISTING_POS_JSON = '{{EXISTING_POS}}';
+const EXISTING_NEG_JSON = '{{EXISTING_NEG}}';
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const coordEl = document.getElementById('coord');
+const btnPos = document.getElementById('btnPos');
+const btnNeg = document.getElementById('btnNeg');
+const btnClear = document.getElementById('btnClear');
+
+let mode = 'pos';
+let posPoints = JSON.parse(EXISTING_POS_JSON || '[]');
+let negPoints = JSON.parse(EXISTING_NEG_JSON || '[]');
+let img = new Image();
+let scaleX = 1, scaleY = 1;
+
+function sendUpdate() {
+  const payload = JSON.stringify({pos: posPoints, neg: negPoints});
+  if (window.parent && window.parent.postMessage) {
+    window.parent.postMessage({type: 'streamlit:setComponentValue', key: API_KEY, value: payload}, '*');
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (img.width) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = 'rgba(0,0,0,0)';
+  ctx.strokeStyle = '#0f0';
+  ctx.lineWidth = 2;
+  for (const p of posPoints) {
+    const x = p[0] * scaleX, y = p[1] * scaleY;
+    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI*2); ctx.fillStyle = 'rgba(0,255,0,0.3)'; ctx.fill();
+    ctx.strokeStyle = '#0f0'; ctx.stroke();
+    ctx.fillStyle = '#0f0'; ctx.font = '12px sans-serif'; ctx.fillText('+', x-4, y+4);
+  }
+  for (const p of negPoints) {
+    const x = p[0] * scaleX, y = p[1] * scaleY;
+    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI*2); ctx.fillStyle = 'rgba(255,0,0,0.3)'; ctx.fill();
+    ctx.strokeStyle = '#f00'; ctx.stroke();
+    ctx.fillStyle = '#f00'; ctx.font = '12px sans-serif'; ctx.fillText('−', x-4, y+4);
+  }
+}
+
+canvas.onclick = function(e) {
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / scaleX;
+  const y = (e.clientY - rect.top) / scaleY;
+  if (mode === 'pos') posPoints.push([Math.round(x), Math.round(y)]);
+  else negPoints.push([Math.round(x), Math.round(y)]);
+  draw();
+  sendUpdate();
+};
+
+canvas.onmousemove = function(e) {
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.round((e.clientX - rect.left) / scaleX);
+  const y = Math.round((e.clientY - rect.top) / scaleY);
+  coordEl.textContent = `(${x}, ${y})`;
+};
+
+btnPos.onclick = function() { mode = 'pos'; btnPos.className = 'active'; btnNeg.className = ''; };
+btnNeg.onclick = function() { mode = 'neg'; btnNeg.className = 'active'; btnPos.className = ''; };
+btnClear.onclick = function() { posPoints = []; negPoints = []; draw(); sendUpdate(); };
+
+img.onload = function() {
+  const maxW = 640;
+  const scale = Math.min(1, maxW / img.width);
+  canvas.width = img.width * scale;
+  canvas.height = img.height * scale;
+  scaleX = canvas.width / img.width;
+  scaleY = canvas.height / img.height;
+  draw();
+};
+img.src = 'data:image/jpeg;base64,' + IMG_B64;
+</script>
+</body>
+</html>

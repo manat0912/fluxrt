@@ -12,7 +12,7 @@ import numpy as np
 
 
 class StreamProcessor:
-    def __init__(self, config_path: str):
+    def __init__(self, config_path):
         self.config = self.parse_config(config_path)
         self.resolution = self.config["resolution"]
         output_batch_size = 2 ** self.config["interpolation_exp"]
@@ -51,7 +51,9 @@ class StreamProcessor:
             self.frame_written,
         )
 
-    def parse_config(self, config_path: str) -> dict:
+    def parse_config(self, config_path) -> dict:
+        if isinstance(config_path, dict):
+            return config_path
         with open(config_path, "r") as file:
             return json.load(file)
 
@@ -85,10 +87,6 @@ class StreamProcessor:
         self.model_inference_subprocess.set_param(name=name, value=value)
 
     def set_reference_image(self, image: np.ndarray | None) -> None:
-        if not self.config.get("use_reference_image", False):
-            raise ValueError(
-                "set_reference_image called but use_reference_image is not enabled in the config"
-            )
         self.model_inference_subprocess.set_reference_image(image)
 
     def set_mask(self, mask: np.ndarray) -> None:
@@ -126,3 +124,9 @@ class StreamProcessor:
 
     def set_gguf_model(self, gguf_path: str) -> None:
         self.model_inference_subprocess.set_gguf_model(gguf_path)
+
+    def reset_cache(self) -> None:
+        self.model_inference_subprocess.command_queue.put(("reset_cache", None))
+
+    def get_model_status(self) -> dict:
+        return dict(self.model_inference_subprocess.shared_state)

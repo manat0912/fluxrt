@@ -1,4 +1,5 @@
 import argparse
+import sys
 
 from fluxrt import StreamProcessor
 from fluxrt.utils import crop_maximal_rectangle
@@ -25,7 +26,13 @@ def main():
     )
 
     resolution = stream_processor.get_resolution()
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(0, cv2.CAP_DSHOW) if sys.platform == "win32" else cv2.VideoCapture(0)
+    # Enable autofocus on DirectShow/OpenCV to prevent blurry feed
+    try:
+        cap.set(cv2.CAP_PROP_AUTOFOCUS, 1.0)
+        print("[Demo] Camera autofocus set to enabled (CAP_PROP_AUTOFOCUS=1)")
+    except Exception as autofocus_err:
+        print(f"[WARNING] Failed to enable camera autofocus: {autofocus_err}")
 
     print("Initializing...")
     while not stream_processor.is_ready():

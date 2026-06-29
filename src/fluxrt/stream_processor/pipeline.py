@@ -214,6 +214,12 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
     model_cpu_offload_seq = "text_encoder->transformer->vae"
     _callback_tensor_inputs = ["latents", "prompt_embeds"]
 
+    @property
+    def _execution_device(self):
+        if hasattr(self, "transformer") and self.transformer is not None:
+            return self.transformer.device
+        return self.device
+
     def __init__(
         self,
         scheduler: FlowMatchEulerDiscreteScheduler,
@@ -519,10 +525,12 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
                 text_encoder=self.text_encoder,
                 tokenizer=self.tokenizer,
                 prompt=prompt,
-                device=device,
+                device=self.text_encoder.device,
                 max_sequence_length=max_sequence_length,
                 hidden_states_layers=text_encoder_out_layers,
             )
+            if prompt_embeds is not None:
+                prompt_embeds = prompt_embeds.to(device)
 
         batch_size, seq_len, _ = prompt_embeds.shape
         prompt_embeds = prompt_embeds.repeat(1, num_images_per_prompt, 1)
@@ -539,9 +547,23 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
         if image.ndim != 4:
             raise ValueError(f"Expected image dims 4, got {image.ndim}.")
 
-        image_latents = retrieve_latents(
-            self.vae.encode(image), generator=generator, sample_mode="argmax"
-        )
+        # Move input to VAE device so VAE can stay on GPU
+        if hasattr(self, "vae") and self.vae is not None:
+            vae_obj = self.vae._orig_mod if hasattr(self.vae, "_orig_mod") else self.vae
+            if hasattr(vae_obj, "to") and callable(getattr(vae_obj, "to", None)):
+                image = image.to(vae_obj.device)
+
+        try:
+            image_latents = retrieve_latents(
+                self.vae.encode(image), generator=generator, sample_mode="argmax"
+            )
+        except Exception as encode_err:
+            print(f"[WARNING] Compiled VAE encode failed ({encode_err}). Falling back to uncompiled VAE encode...")
+            if hasattr(self.vae, "_orig_encode"):
+                self.vae.encode = self.vae._orig_encode
+            image_latents = retrieve_latents(
+                self.vae.encode(image), generator=generator, sample_mode="argmax"
+            )
         image_latents = self._patchify_latents(image_latents)
 
         latents_bn_mean = self.vae.bn.running_mean.view(1, -1, 1, 1).to(
@@ -565,6 +587,7 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
         device,
         generator: torch.Generator,
         latents: torch.Tensor | None = None,
+        noise_offset: float = 0.0,
     ):
         # VAE applies 8x compression on images but we must also account for packing which requires
         # latent height and width to be divisible by 2.
@@ -578,9 +601,24 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators."
             )
         if latents is None:
+            # Ensure generator device matches target device
+            if generator is not None and hasattr(generator, "device"):
+                if ("cuda" in str(device)) != ("cuda" in str(generator.device)):
+                    if "cuda" in str(device):
+                        generator = torch.Generator(device="cuda").manual_seed(42)
+                    else:
+                        generator = torch.Generator(device="cpu").manual_seed(42)
             latents = randn_tensor(
                 shape, generator=generator, device=device, dtype=dtype
             )
+            if noise_offset > 0.0:
+                offset = torch.randn(
+                    (shape[0], shape[1], 1, 1),
+                    generator=generator,
+                    device=device,
+                    dtype=dtype,
+                ) * noise_offset
+                latents = latents + offset
         else:
             latents = latents.to(device=device, dtype=dtype)
 
@@ -720,6 +758,12 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
         callback_on_step_end_tensor_inputs: list[str] = ["latents"],
         max_sequence_length: int = 512,
         text_encoder_out_layers: tuple[int] = (9, 18, 27),
+        noise_offset: float = 0.0,
+        guidance_rescale: float = 0.0,
+        eta: float = 0.0,
+        temporal_smoothing: float = 0.0,
+        vae_decode_scaling: float = 1.0,
+        denoise: float = 1.0,
     ):
         r"""
         Function invoked when calling the pipeline for generation.
@@ -891,17 +935,33 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
             device=device,
             generator=generator,
             latents=latents,
+            noise_offset=noise_offset,
         )
 
         image_latents = None
         image_latent_ids = None
         if condition_images is not None:
+            # Safe and robust VAE dtype resolution supporting compiled and wrapped modules
+            vae_dtype = torch.bfloat16
+            if hasattr(self, "vae") and self.vae is not None:
+                vae_obj = self.vae
+                if hasattr(vae_obj, "_orig_mod"):
+                    vae_obj = vae_obj._orig_mod
+                if hasattr(vae_obj, "dtype") and not callable(getattr(vae_obj, "dtype", None)):
+                    vae_dtype = vae_obj.dtype
+                elif hasattr(vae_obj, "config") and hasattr(vae_obj.config, "torch_dtype"):
+                    vae_dtype = vae_obj.config.torch_dtype
+                elif hasattr(vae_obj, "parameters"):
+                    try:
+                        vae_dtype = next(vae_obj.parameters()).dtype
+                    except Exception:
+                        pass
             image_latents, image_latent_ids = self.prepare_image_latents(
                 images=condition_images,
                 batch_size=batch_size * num_images_per_prompt,
                 generator=generator,
                 device=device,
-                dtype=self.vae.dtype,
+                dtype=vae_dtype,
             )
 
         profile("5")
@@ -913,7 +973,8 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
             else sigmas
         )
         if (
-            hasattr(self.scheduler.config, "use_flow_sigmas")
+            sigmas is None
+            and hasattr(self.scheduler.config, "use_flow_sigmas")
             and self.scheduler.config.use_flow_sigmas
         ):
             sigmas = None
@@ -979,12 +1040,18 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
                 # broadcast to batch dimension in a way that's compatible with ONNX/Core ML
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
 
-                latent_model_input = latents.to(self.transformer.dtype)
+                # Resolve safe compute dtype — GGUF models return torch.uint8 from .dtype
+                # which would corrupt float latents. Always use bfloat16 as compute dtype.
+                _compute_dtype = self.transformer.dtype
+                if _compute_dtype not in (torch.float16, torch.bfloat16, torch.float32):
+                    _compute_dtype = torch.bfloat16
+
+                latent_model_input = latents.to(_compute_dtype)
                 latent_image_ids = latent_ids
 
                 if image_latents is not None:
                     latent_model_input = torch.cat([latents, image_latents], dim=1).to(
-                        self.transformer.dtype
+                        _compute_dtype
                     )
                     latent_image_ids = torch.cat([latent_ids, image_latent_ids], dim=1)
 
@@ -994,9 +1061,16 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
                     spatial_cache = None
                     if self.subprocess_config["enable_spatial_cache"]:
                         timestep_key = int(timestep)
+                        _text_seq_len = self.subprocess_config.get("max_sequence_length", 512) if self.subprocess_config else 512
+                        _expected_full_seq_len = _text_seq_len + latent_model_input.shape[1]
+                        # Invalidate stale cache if dimensions have changed
+                        # (e.g. text_seq_len mismatch after a config or prompt change).
+                        if timestep_key in self.spatial_cache and self.spatial_cache[timestep_key].full_seq_len != _expected_full_seq_len:
+                            del self.spatial_cache[timestep_key]
                         if timestep_key not in self.spatial_cache:
                             self.spatial_cache[timestep_key] = SpatialCache(
                                 image_seq_len=latent_model_input.shape[1],
+                                text_seq_len=_text_seq_len,
                                 output_channels=128,
                             )
                         spatial_cache = self.spatial_cache[timestep_key]
@@ -1030,14 +1104,26 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
                             return_dict=False,
                         )[0]
                     neg_noise_pred = neg_noise_pred[:, : latents.size(1) :]
+                    cond_noise_pred = noise_pred
                     noise_pred = neg_noise_pred + guidance_scale * (
                         noise_pred - neg_noise_pred
                     )
+                    
+                    if guidance_rescale > 0.0:
+                        std_cond = cond_noise_pred.std(dim=list(range(1, cond_noise_pred.ndim)), keepdim=True)
+                        std_cfg = noise_pred.std(dim=list(range(1, noise_pred.ndim)), keepdim=True)
+                        noise_pred_rescaled = noise_pred * (std_cond / std_cfg)
+                        noise_pred = guidance_rescale * noise_pred_rescaled + (1.0 - guidance_rescale) * noise_pred
 
                 # compute the previous noisy sample x_t -> x_t-1
                 latents_dtype = latents.dtype
+                import inspect
+                step_kwargs = {}
+                step_sig = inspect.signature(self.scheduler.step).parameters
+                if "eta" in step_sig:
+                    step_kwargs["eta"] = eta
                 latents = self.scheduler.step(
-                    noise_pred, t, latents, return_dict=False
+                    noise_pred, t, latents, return_dict=False, **step_kwargs
                 )[0]
 
                 if latents.dtype != latents_dtype:
@@ -1069,20 +1155,32 @@ class Flux2KleinPipeline(DiffusionPipeline, Flux2LoraLoaderMixin):
             latents, latent_ids, latent_height // 2, latent_width // 2
         )
 
+        # Temporal smoothing
+        if hasattr(self, "_previous_latents") and self._previous_latents is not None and temporal_smoothing > 0.0:
+            if self._previous_latents.shape == latents.shape:
+                latents = (1.0 - temporal_smoothing) * latents + temporal_smoothing * self._previous_latents
+        self._previous_latents = latents
+
         latents_bn_mean = self.vae.bn.running_mean.view(1, -1, 1, 1).to(
             latents.device, latents.dtype
         )
         latents_bn_std = torch.sqrt(
             self.vae.bn.running_var.view(1, -1, 1, 1) + self.vae.config.batch_norm_eps
         ).to(latents.device, latents.dtype)
-        latents = latents * latents_bn_std + latents_bn_mean
+        latents = latents * (latents_bn_std * vae_decode_scaling) + latents_bn_mean
         latents = self._unpatchify_latents(latents)
 
         profile("7")
         if output_type == "latent":
             image = latents
         else:
-            image = self.vae.decode(latents, return_dict=False)[0]
+            try:
+                image = self.vae.decode(latents, return_dict=False)[0]
+            except Exception as decode_err:
+                print(f"[WARNING] Compiled VAE decode failed ({decode_err}). Falling back to uncompiled VAE decode...")
+                if hasattr(self.vae, "_orig_decode"):
+                    self.vae.decode = self.vae._orig_decode
+                image = self.vae.decode(latents, return_dict=False)[0]
             image = self.image_processor.postprocess(image, output_type=output_type)
 
         profile("decode")

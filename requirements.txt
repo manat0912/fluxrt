@@ -2,11 +2,14 @@ diffusers
 transformers
 numpy>=2.0
 opencv-python==4.12.0.88
-gradio==6.12.0
 accelerate
 safetensors>=0.4.0
 optimum-quanto
 peft
 pyvirtualcam
-pyside6
+streamlit
 triton-windows>=3.6,<3.7; platform_system == "Windows"
+sounddevice
+pygrabber
+tensorrt-cu12
+mediapipe

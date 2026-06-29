@@ -221,3 +221,4 @@ marimo/_lsp/
 __marimo__/
 
 models/
+*.bak

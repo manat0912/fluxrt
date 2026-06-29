@@ -1,3 +1,12 @@
+import builtins
+import sys
+
+def print(*args, **kwargs):
+    kwargs['flush'] = True
+    builtins.print(*args, **kwargs)
+    sys.stdout.flush()
+    sys.stderr.flush()
+
 from multiprocessing import Process, Value
 from fluxrt.utils.shared_tensor import SharedTensor
 import time
@@ -25,6 +34,15 @@ class OutputSchedulerSubprocess:
 
         self.interpolation_exp = self.config.get("interpolation_exp", 1)
         self.batch_size = 2**self.interpolation_exp
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        if "process" in state:
+            state["process"] = None
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
     def start(self) -> None:
         self.running.value = True
@@ -57,6 +75,7 @@ class OutputSchedulerSubprocess:
 
         while self.running.value:
             if not self.pack_is_ready.value:
+                time.sleep(0.01)
                 continue
 
             proc_time = min(max(self.last_processing_time.value, 0.001), 1.0)

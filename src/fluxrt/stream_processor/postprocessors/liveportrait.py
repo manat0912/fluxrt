@@ -54,16 +54,25 @@ class LivePortraitPostProcessor(BasePostProcessor):
         I = self.wrapper.prepare_source(crop_info['img_crop_256x256'])
         return self.wrapper.get_kp_info(I)
 
-    def process(self, source_rgb: np.ndarray, driving_rgb: np.ndarray) -> np.ndarray:
+    def process(self, source_rgb: np.ndarray, driving_rgb: np.ndarray, target_rgb: np.ndarray = None, audio_volume: float = 0.0) -> np.ndarray:
+        if target_rgb is None:
+            target_rgb = source_rgb.copy()
+            
         driving_kp_info = self._get_kp_info(driving_rgb)
         if driving_kp_info is None:
-            return source_rgb
+            return target_rgb
 
-        crop_info = self.cropper.crop_source_image(source_rgb, self.crop_cfg)
-        if crop_info is None:
-            return source_rgb
+        # Crop target_rgb to get coordinates where the face is in the output video
+        crop_info_target = self.cropper.crop_source_image(target_rgb, self.crop_cfg)
+        if crop_info_target is None:
+            return target_rgb
 
-        I_s = self.wrapper.prepare_source(crop_info['img_crop_256x256'])
+        # Crop source_rgb (the asset image) to get the face features we want to transfer
+        crop_info_source = self.cropper.crop_source_image(source_rgb, self.crop_cfg)
+        if crop_info_source is None:
+            return target_rgb
+
+        I_s = self.wrapper.prepare_source(crop_info_source['img_crop_256x256'])
         x_s_info = self.wrapper.get_kp_info(I_s)
         x_c_s = x_s_info['kp']
         R_s = get_rotation_matrix(x_s_info['pitch'], x_s_info['yaw'], x_s_info['roll'])
@@ -74,6 +83,14 @@ class LivePortraitPostProcessor(BasePostProcessor):
         delta_new = x_s_info['exp'].clone()
         for idx in _LIP_INDICES:
             delta_new[:, idx, :] = (x_s_info['exp'] + (driving_kp_info['exp'] - lip_array))[:, idx, :]
+
+        # Open mouth vertically by moving upper lips up and lower lips down based on audio_volume
+        if audio_volume > 0.005:
+            shift = audio_volume * 2.5
+            delta_new[:, 14, 1] -= shift * 0.5  # Move upper lip up
+            delta_new[:, 19, 1] += shift * 1.0  # Move lower lip down
+            delta_new[:, 17, 1] -= shift * 0.3
+            delta_new[:, 20, 1] += shift * 0.5
 
         t_new = x_s_info['t'].clone()
         t_new[..., 2].fill_(0)
@@ -86,7 +103,7 @@ class LivePortraitPostProcessor(BasePostProcessor):
 
         mask_ori = prepare_paste_back(
             self.inf_cfg.mask_crop,
-            crop_info['M_c2o'],
-            dsize=(source_rgb.shape[1], source_rgb.shape[0]),
+            crop_info_target['M_c2o'],
+            dsize=(target_rgb.shape[1], target_rgb.shape[0]),
         )
-        return paste_back(I_p, crop_info['M_c2o'], source_rgb, mask_ori)
+        return paste_back(I_p, crop_info_target['M_c2o'], target_rgb, mask_ori)

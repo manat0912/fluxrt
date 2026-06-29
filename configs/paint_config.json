@@ -1,20 +1,30 @@
 {
-    "default_prompt" : "Black background, dark noisy texture, metalic, smooth, gray grain, 4k, high quality",
-    "default_steps" : 2,
-    "default_seed" : 52,
-    "models_path" : "FLUX.2-klein-4B",
+    "default_prompt": "Black background, dark noisy texture, metalic, smooth, gray grain, 4k, high quality",
+    "default_steps": 2,
+    "default_seed": 52,
+    "models_path": "FLUX.2-klein-4B",
     "int8_models_path": "FLUX.2-klein-4B-int8",
-    "resolution" : {
-        "height" : 320,
-        "width" : 576
+    "resolution": {
+        "height": 320,
+        "width": 576
     },
     "compile_models": false,
     "enable_spatial_cache": true,
     "enable_int8_quantization": false,
-    "target_fps":null,
-    "interpolation_exp": 2,
+    "target_fps": null,
+    "interpolation_exp": 5,
     "use_reference_image": false,
     "logging": false,
     "always_update_image_cache": false,
-    "mask_calculation_method": "manual"
+    "mask_calculation_method": "manual",
+    "max_sequence_length": 128,
+    "output_enhancer": {
+        "enable": true,
+        "sharpen_strength": 0.5,
+        "denoise_strength": 0,
+        "deblock_strength": 0.2,
+        "temporal_strength": 0,
+        "upscale_factor": 0,
+        "contrast_clip": 0
+    }
 }

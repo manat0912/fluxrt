@@ -45,13 +45,14 @@ class UpdateController:
             self.previous_reset = time.time()
 
         self.reset_period = reset_period
-        self.requires_reset = False
+        self.requires_reset = True
         self.text_is_valid = False
         self.reference_image_is_valid = False
         self.config = config
 
         self.mask_calculation_method = config.get("mask_calculation_method", "auto")
-        self.always_update_image_cache = config.get("always_update_image_cache", True)
+        self.always_update_image_cache = config.get("always_update_image_cache", False)
+        self.spatial_cache_threshold = config.get("spatial_cache_threshold", 0.005)
 
         self.requires_update_image_cache = True
 
@@ -118,7 +119,7 @@ class UpdateController:
         difference_mask = torch.max_pool2d(
             difference, (self.compression_ratio, self.compression_ratio)
         )
-        difference_mask = difference_mask > 0.1
+        difference_mask = difference_mask > self.spatial_cache_threshold
         difference_mask_dilated = (
             FF.max_pool2d(difference_mask.float(), kernel_size=3, stride=1, padding=1)
             > 0
