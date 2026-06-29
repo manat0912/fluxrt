@@ -453,16 +453,16 @@ class SharedState:
 
         # Advanced generation settings
         self.cfg_scale = 4.5
-        self.distilled_mode = False
+        self.distilled_mode = True
         self.denoise = 0.55
-        self.noise_offset = 0.2
-        self.guidance_rescale = 0.35
+        self.noise_offset = 0.0
+        self.guidance_rescale = 0.0
         self.sampler = "Euler"
-        self.sigma_min = 0.1
-        self.sigma_max = 6.0
-        self.eta = 0.1
-        self.temporal_smoothing = 0.35
-        self.vae_decode_scaling = 0.85
+        self.sigma_min = 0.0
+        self.sigma_max = 1.0
+        self.eta = 0.0
+        self.temporal_smoothing = 0.0
+        self.vae_decode_scaling = 1.0
         self.resolution_str = "576x320"
         self.params_dirty = False
 
@@ -585,8 +585,8 @@ if __name__ == "__main__":
             index=["Euler", "Heun", "Euler Ancestral", "DPM++ 2M"].index(st.session_state._shared.sampler)
         )
         
-        sigma_min = st.slider("Sigma Min", 0.0, 2.0, st.session_state._shared.sigma_min, 0.05)
-        sigma_max = st.slider("Sigma Max", 1.0, 20.0, st.session_state._shared.sigma_max, 0.5)
+        sigma_min = st.slider("Sigma Min", 0.0, 1.0, st.session_state._shared.sigma_min, 0.05)
+        sigma_max = st.slider("Sigma Max", 0.1, 1.0, st.session_state._shared.sigma_max, 0.05)
         eta = st.slider("ETA", 0.0, 1.0, st.session_state._shared.eta, 0.05)
         temporal_smoothing = st.slider("Temporal Smoothing", 0.0, 1.0, st.session_state._shared.temporal_smoothing, 0.05)
         vae_decode_scaling = st.slider("VAE Decode Scaling", 0.1, 1.5, st.session_state._shared.vae_decode_scaling, 0.05)

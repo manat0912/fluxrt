@@ -214,7 +214,7 @@ class BackgroundCompositor:
     def add_click_point(self, x: int, y: int, positive: bool = True):
         (self.click_points_pos if positive else self.click_points_neg).append((x, y))
         self._recompute = True
-        if positive and self.click_segmenter._predictor is not None:
+        if positive and self.click_segmenter._model is not None:
             pass  # set_image called externally
 
     def clear_clicks(self):
@@ -226,7 +226,7 @@ class BackgroundCompositor:
         h, w = frame_rgb.shape[:2]
         if self.use_clicks and (self.click_points_pos or self.click_points_neg):
             if self._recompute:
-                if self.click_segmenter._predictor is not None:
+                if self.click_segmenter._model is not None:
                     self.click_segmenter.set_image(frame_rgb)
                 mask = self.click_segmenter.predict(self.click_points_pos, self.click_points_neg)
                 if mask.shape[:2] != (h, w):
